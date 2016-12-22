@@ -1,0 +1,180 @@
+---
+title: "Fall Chinook Tagging Summary 2016"
+author: "Gabriel Singer"
+date: "December 20, 2016"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+library(readxl)
+library(readr)
+library(dplyr)
+library(chron)
+library(wesanderson)
+library(stargazer)
+library(knitr)
+library(ggplot2)
+library(devtools)
+
+##Install R packages written by Myfanwy: fishtrackr, 
+## run at beginning before sourcing csvs written ## 
+# get.CDEC("LIS","E",25,"2015-09-05","2015-11-15") # get LIS sensor info for temp
+#  cdec.dat$date <- as.POSIXct(cdec.dat$date, format = "%Y-%M-%D") # convert to usable format
+# 
+#  #clean up and write to csv
+# dd <- cdec.dat %>% 
+#   group_by(date) %>% 
+#   summarise(meantemp = mean(sensor_25))
+# which(dd$meantemp > 75) # figure out which values are weird
+# dd[53, 2] <- NA # reassign weird values to NA
+# dd$meantempC <- (dd$meantemp - 32)*(5/9) # convert to celcius
+# write.csv(dd, "cdecdat.csv")
+
+## Doing same for DO:
+# get.CDEC("LIS","E", 61 ,"2015-09-05","2015-11-15")
+
+# Load data
+d <- read_excel("../data/AdultChinook_YBP_2015.xlsx")
+dd <- read_csv("../data/cdecdat.csv")
+dd$date <- as.POSIXct(dd$date, format = "%Y-%M-%D") # convert to usable format
+
+f <- read_csv("../data/cdecdatDO.csv")
+f$date <- as.POSIXct(f$date, format = "%Y-%M-%D")
+f <- f %>% 
+   group_by(date) %>% 
+   summarise(meanDO = mean(sensor_61))
+
+d <- select(d, -c(co2, floy, genetics, rampnotes))
+d <- d[1:30,]
+# Extract times only
+d$toc <- as.POSIXlt(d$toc)
+d$toc <- strftime(d$toc, format = "%H:%M:%S") 
+d$toc <- times(d$toc) # This is what I was looking for
+
+# Do the same for the other time columns:
+d$surgstart <- as.POSIXlt(d$surgstart)
+d$surgstart <- strftime(d$surgstart, format = "%H:%M:%S") 
+d$surgstart <- times(d$surgstart) 
+head(d$surgstart)
+
+d$surgend <- as.POSIXlt(d$surgend)
+d$surgend <- strftime(d$surgend, format = "%H:%M:%S") 
+d$surgend <- times(d$surgend) 
+
+d$tor <- as.POSIXlt(d$tor)
+d$tor <- strftime(d$tor, format = "%H:%M:%S") 
+d$tor <- times(d$tor)
+
+# Add handling time column
+d$handlingtime <- times(d$tor - d$toc, out.format = "h:m")
+head(d$handlingtime)
+class(d$handlingtime)
+d$handlingtime <- as.numeric(as.character(d$handlingtime))
+
+# Add surgery time column
+d$surgtime <- times(d$surgend - d$surgstart, out.format = "h:m")
+d$surgtime <- as.numeric(as.character(d$surgtime))
+head(d$surgtime)
+
+detach("package:chron", unload = TRUE)
+```
+
+## Basic Summaries
+
+```{r kable_stargaze, results='asis'}
+# Tagging locations
+d5 <- d %>% 
+  group_by(tagloc) %>% 
+  summarise(N = n(), meanhandle = mean(handlingtime), meanrecov = mean(recov), meanramp = mean(c(TailGrab, BodyFlex, HeadComplex, VOR, Orientation)))
+kable(d5, caption = "Breakdown By Tag Site", col.names = c("Tagging Location", "N", "Mean Handling Time", "Mean Recovery Time", "Mean Ramp Score"), digits = 2)
+
+d2 <- 
+  d %>% count(sex)
+kable(d2, caption = 'Number of Males and Females', col.names = c("Sex", "N"))
+
+d3 <- d %>% 
+  group_by(surgeon) %>% 
+  summarise(n = n(), mean_surgtime = mean(surgtime)) %>% 
+  arrange(-n)
+kable(d3, caption = "Surgery Summaries", col.names = c("Surgeon", "N", "Mean Surgery Time"), digits = 2)
+
+```
+
+### Demographic Summaries
+```{r demplots, fig.height=5, fig.width=10}
+
+## Set palette from here on out to Darjeeling:
+dar <- wes_palette("Darjeeling", type = "discrete")
+darc <- wes_palette("Darjeeling", type = "continuous")
+
+# mean difference in fork length/total length between males and females?
+
+ggplot(d, aes(x = sex, y = fl)) + 
+  geom_boxplot(aes(color = sex, fill = sex, alpha = 0.8)) + 
+  ylab("Fork Length (mm)") + scale_x_discrete(labels = c("Female", "Male", "Unknown")) + 
+  ggtitle("Fork Length By Sex") + 
+  theme(legend.position = "none") + xlab(" ") + scale_color_manual(values = wes_palette("Darjeeling")) + scale_fill_manual(values = wes_palette("Darjeeling"))
+
+ggplot(d, aes(x = sex, y = tl)) + 
+  geom_boxplot(aes(color = sex, fill = sex, alpha = 0.8)) + 
+  ylab("Total Length (mm)") + scale_x_discrete(labels = c("Female", "Male", "Unknown")) + 
+  ggtitle("Total Length By Sex") + 
+  theme(legend.position = "none") + xlab(" ") + scale_color_manual(values = wes_palette("Darjeeling")) + scale_fill_manual(values = wes_palette("Darjeeling"))
+
+```
+
+## Seasonal Summaries
+
+```{r plots, fig.height=5, fig.width=10, warning=FALSE, message=FALSE}
+
+## Set palette from here on out to Darjeeling:
+dar <- wes_palette("Darjeeling", type = "discrete")
+darc <- wes_palette("Darjeeling", type = "continuous")
+
+ggplot(d, aes(x = datetagged, y = handlingtime)) + geom_point(aes(color = tagloc), position = "jitter", size = 3) +
+  ggtitle("Handling Times Across Tagging Season") + ylab("Handling Time (mins)") + xlab("Date") + geom_smooth(color = "black", size = 0.3) + scale_color_manual(values = dar)
+
+# where did we catch fish over time?
+d %>% 
+  group_by(datetagged, tagloc) %>% 
+  summarise(count = n()) %>% 
+ggplot(., aes(x = datetagged, y = count)) + geom_bar(aes(fill = tagloc), stat = "identity", position = "dodge" ) + scale_fill_manual(values = dar) + ggtitle("Tagging Location and Numbers Across Time") + ylab("Number of Fish Tagged") + xlab("Date") + theme(legend.title = element_blank())
+
+# what tide did we catch fish on?
+d %>% 
+  group_by(tide) %>% 
+  summarise(count = n()) %>% 
+  ggplot(., aes(x = tide, y = count)) + geom_bar(aes(fill = tide, width = 0.5), stat = "identity") + theme(legend.position = "none") + ggtitle("More Fish Were Caught During Flood Tide \n (reflects documented catches, not total effort)") + scale_fill_manual(values = dar) + scale_x_discrete(labels = c("Ebb", "Flood", "Slack")) + xlab(" ") + ylab("Number of Fish")
+
+# Toe Drain Temperature vs. Tagged Fish
+
+ggplot(d, aes(x = datetagged, y = TD_temp)) + geom_point(size = 2) + geom_line(data = dd, aes(x = date, y = meantempC), color = "#00A08A") + ggtitle("Toe Drain Temperature Across Tagging Season") + ylab("Temperature (C)") + xlab("Date")
+
+# Toe Drain DO vs. Tagged Fish
+ggplot(d, aes(x = datetagged, y = TD_do)) + geom_point(size = 2) + geom_line(data = f, aes(x = date, y = meanDO), color = "#046C9A") + ggtitle("Toe Drain Dissolved Oxygen Across Tagging Season") + ylab("Dissolved Oxygen (mg/L)") + xlab("Date")
+```
+Black dots denote days when fish were tagged.  Note that the temperature and dissolved oxygen lines represent daily averages from the Lisbon Weir CDEC station; these were recorded recorded at the time of tagging as well, and are mapped by the black dots.
+
+```{r DO_and_temp, fig.height=5, fig.width=10}
+# Dissolved Oxygen and Temp vs. Ramp Score
+d <- d %>% 
+  group_by(tagid) %>% 
+  mutate(meanramp = mean(c(TailGrab, BodyFlex, HeadComplex, VOR, Orientation)))
+
+# Count number of fish tagged on each day and add as a new variable:
+d <- d %>% 
+  group_by(datetagged) %>% 
+  mutate(count = n()) %>% 
+  ungroup()
+
+ggplot(d, aes(x = TD_temp, y = meanramp)) + geom_point(aes(size = count), color = "#046C9C", alpha = 0.6) + ggtitle("Mean Aggregate RAMP Score Increases with Temperature") + ylab("Aggregate RAMP Score") + xlab("Temperature (C)") + scale_color_manual(values = dar) + theme(legend.title = element_blank())
+
+```
+
+Blue dots denote days when fish were tagged; size of the dot indicates how many were tagged on that day with the same aggregate ramp score (possible values are 1:7).  As we can see, the highest RAMP scores (indicating the most impaired fish) were coincident with higher temperatures.  As such, they were also coincident with earlier dates of tagging (not plotted).
+
+Banana results will need further analysis; but in general, we caught more fish on days when no bananas were eaten. :)
+
+
+
+
